@@ -1,0 +1,21 @@
+# Maintainer: openOODA-tools <ops@openooda.org>
+pkgname=ooenv-bin
+_pkgname=ooenv
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Capability-bounded environment variable inspection, sanitization, and scoped export."
+arch=('x86_64')
+url="https://github.com/openOODA-tools/ooenv"
+license=('Apache-2.0')
+depends=('glibc')
+provides=('ooenv')
+conflicts=('ooenv')
+source_x86_64=("${url}/releases/download/v${pkgver}/ooenv-linux-x86_64"
+               "uninstall.sh::https://raw.githubusercontent.com/openOODA-tools/${_pkgname}/v${pkgver}/uninstall.sh")
+sha256sums_x86_64=('SKIP'
+                   'SKIP')
+
+package() {
+    install -Dm755 "${srcdir}/ooenv-linux-x86_64" "${pkgdir}/usr/bin/ooenv"
+    install -Dm755 uninstall.sh "${pkgdir}/usr/bin/ooenv-uninstall"
+}
