@@ -1,0 +1,72 @@
+// # Render Subsystem Test Anchor
+//
+// Logline: Verification suite validating POSIX table, JSON serialization, and systemd formatting pipelines.
+//
+// Setup: Pure assertions verifying output rendering across standard and security-sensitive modes.
+//
+// Beats:
+//   1. Verify POSIX environment string rendering with sanitization masking.
+//   2. Test structured audit report formatting.
+//   3. Validate JSON array and dictionary serialization.
+//   4. Confirm systemd drop-in and Podman Quadlet configuration generators.
+
+import "core/env_types.oo";
+import "render/render_table.oo";
+import "render/render_json.oo";
+import "render/render_systemd.oo";
+
+pub fn run_render_tests() -> Bool {
+    // Test 1: POSIX table rendering with sanitization
+    let mut vars: List[EnvVar] = list_new();
+    vars = list_push(vars, make_env_var("USER", "sovereign", false));
+    vars = list_push(vars, make_env_var("API_KEY", "secretkey12345678", false));
+
+    let mut opts: EnvOpts = default_env_opts();
+    opts.sanitize_mode = true;
+    let rendered_posix: String = render_posix_env(vars, opts);
+    if !str_contains(rendered_posix, "USER=sovereign") {
+        print("FAIL: render render_posix_env missing USER\n");
+        return false;
+    }
+    if !str_contains(rendered_posix, "********") {
+        print("FAIL: render render_posix_env did not mask secret\n");
+        return false;
+    }
+
+    // Test 2: Audit report rendering
+    let mut issues: List[EnvIssue] = list_new();
+    issues = list_push(issues, EnvIssue {
+        var_name: "LD_PRELOAD",
+        severity: "CRITICAL",
+        message: "Dynamic library preloading variable detected."
+    });
+    let audit_text: String = render_audit_report(issues, 2);
+    if !str_contains(audit_text, "[CRITICAL] LD_PRELOAD") {
+        print("FAIL: render render_audit_report missing CRITICAL tag\n");
+        return false;
+    }
+
+    // Test 3: JSON rendering
+    let json_text: String = render_json_env_list(vars, true);
+    if !str_contains(json_text, "\"key\":\"API_KEY\"") {
+        print("FAIL: render render_json_env_list missing API_KEY key\n");
+        return false;
+    }
+
+    // Test 4: Systemd drop-in rendering
+    let dropin_text: String = render_systemd_dropin(vars, "mydaemon");
+    if !str_contains(dropin_text, "[Service]") || !str_contains(dropin_text, "Environment=\"USER=sovereign\"") {
+        print("FAIL: render render_systemd_dropin missing expected Service block\n");
+        return false;
+    }
+
+    // Test 5: Podman Quadlet rendering
+    let quadlet_text: String = render_quadlet_env(vars, "mycontainer");
+    if !str_contains(quadlet_text, "[Container]") || !str_contains(quadlet_text, "Environment=USER=sovereign") {
+        print("FAIL: render render_quadlet_env missing expected Container block\n");
+        return false;
+    }
+
+    print("PASS: render subsystem tests passed\n");
+    return true;
+}

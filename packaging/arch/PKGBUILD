@@ -1,9 +1,9 @@
 # Maintainer: openOODA-tools <ops@openooda.org>
 pkgname=ooenv-bin
 _pkgname=ooenv
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
-pkgdesc="Capability-bounded environment variable inspection, sanitization, and scoped export."
+pkgdesc="Sovereign POSIX environment controller, secret sanitizer, and execution simulator"
 arch=('x86_64')
 url="https://github.com/openOODA-tools/ooenv"
 license=('Apache-2.0')

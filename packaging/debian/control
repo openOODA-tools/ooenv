@@ -8,7 +8,7 @@ Build-Depends: debhelper-compat (= 13)
 Package: ooenv
 Architecture: amd64
 Depends: libc6
-Description: ENV CONTROLLER
- Capability-bounded environment variable inspection, sanitization, and scoped export.
+Description: Sovereign POSIX environment controller, secret sanitizer, and execution simulator in pure openOODA.
  Capability-bounded openOODA utility with zero ambient authority,
- oote theme palettes, and native Model Context Protocol (MCP) surface.
+ secret token redaction, dangerous variable auditing, systemd unit override
+ generation, and streaming Model Context Protocol (MCP) surface.

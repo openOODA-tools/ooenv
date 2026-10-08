@@ -1,0 +1,223 @@
+// # Streaming MCP Server for Environment Management
+//
+// Logline: JSON-RPC 2.0 stdio server providing sovereign environment inspection, security auditing, and systemd tools.
+//
+// Setup: Bridges standard input/output streaming protocol to environment transformers, auditors, and renderers.
+//
+// Beats:
+//   1. Handle MCP initialize handshake with server metadata and capability declarations.
+//   2. Expose tools/list catalogue with six sovereign environment tools.
+//   3. Dispatch tools/call for list, get, simulate, audit, systemd, and demo.
+//   4. Deliver streaming JSON-RPC responses over standard output.
+
+import "core/env_types.oo";
+import "core/env_audit.oo";
+import "core/env_synthetic.oo";
+import "render/render_table.oo";
+import "render/render_json.oo";
+import "render/render_systemd.oo";
+import "ipc/json_field.oo";
+
+fn build_error(id: String, code: Int, msg: String) -> String {
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":"
+        + code.to_string() + ",\"message\":\"" + json_escape(msg) + "\"}}\n";
+}
+
+fn build_tool_result(id: String, text: String) -> String {
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
+        + json_escape(text) + "\"}]}}\n";
+}
+
+pub fn render_mcp_init(id: String) -> String {
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + id
+        + ",\"result\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"ooenv\",\"version\":\"0.2.0\"}}}\n";
+}
+
+pub fn render_mcp_tools_list(id: String) -> String {
+    let mut out: String = "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"tools\":[";
+    out = out + "{\"name\":\"env_list\",\"description\":\"List environment variables with optional prefix filter and secret sanitization.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"prefix\":{\"type\":\"string\"},\"sanitize\":{\"type\":\"boolean\"},\"json_mode\":{\"type\":\"boolean\"}}}}";
+    out = out + ",{\"name\":\"env_get\",\"description\":\"Retrieve single environment variable by name with security classification.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"variable\":{\"type\":\"string\"}},\"required\":[\"variable\"]}}";
+    out = out + ",{\"name\":\"env_simulate\",\"description\":\"Simulate environment transformations and compute state delta.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"ignore_env\":{\"type\":\"boolean\"},\"set\":{\"type\":\"string\"},\"unset\":{\"type\":\"string\"}}}}";
+    out = out + ",{\"name\":\"env_audit\",\"description\":\"Audit environment for security risks, leaked tokens, and unsafe PATH configurations.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"vulnerable_profile\":{\"type\":\"boolean\"},\"json_mode\":{\"type\":\"boolean\"}}}}";
+    out = out + ",{\"name\":\"env_systemd\",\"description\":\"Generate systemd drop-in unit override configuration.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"unit\":{\"type\":\"string\"}}}}";
+    out = out + ",{\"name\":\"env_demo\",\"description\":\"Run multi-scenario sovereign environment showcase.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}";
+    out = out + "]}}\n";
+    return out;
+}
+
+pub fn handle_mcp_call(id: String, tool_name: String, req: String) -> String {
+    if tool_name == "env_demo" {
+        let base: List[EnvVar] = build_production_env();
+        let mut opts: EnvOpts = default_env_opts();
+        opts.sanitize_mode = true;
+        let mut out: String = "=== Sovereign Environment Showcase ===\n";
+        out = out + "-- Production Sanitized View --\n" + render_posix_env(base, opts) + "\n";
+        let vuln: List[EnvVar] = build_vulnerable_env();
+        let issues: List[EnvIssue] = audit_environment(vuln);
+        out = out + render_audit_report(issues, list_len(vuln));
+        return build_tool_result(id, out);
+    }
+
+    if tool_name == "env_list" {
+        let prefix: String = json_extract_str_field(req, "prefix");
+        let sanitize: Bool = json_extract_bool_field(req, "sanitize", true);
+        let json_mode: Bool = json_extract_bool_field(req, "json_mode", false);
+        let base: List[EnvVar] = build_production_env();
+        let mut opts: EnvOpts = default_env_opts();
+        opts.filter_prefix = prefix;
+        opts.sanitize_mode = sanitize;
+        let filtered: List[EnvVar] = apply_env_transforms(base, opts);
+        let out: String = if json_mode {
+            render_json_env_list(filtered, sanitize)
+        } else {
+            render_posix_env(filtered, opts)
+        };
+        return build_tool_result(id, out);
+    }
+
+    if tool_name == "env_get" {
+        let mut var_name: String = json_extract_str_field(req, "variable");
+        if var_name == "" {
+            var_name = json_extract_str_field(req, "key");
+        }
+        let base: List[EnvVar] = build_production_env();
+        let idx: Int = find_var_by_key(base, var_name);
+        if idx < 0 {
+            return build_tool_result(id, "Variable not found: " + var_name);
+        }
+        let found_var: EnvVar = list_get(base, idx);
+        let k_str: String = found_var.key;
+        let v_val: String = if found_var.is_secret { mask_secret(found_var.val) } else { found_var.val };
+        let sec_str: String = if found_var.is_secret { "yes" } else { "no" };
+        let insec_str: String = if found_var.is_insecure { "yes" } else { "no" };
+        let mut out: String = "Key: " + k_str + "\n";
+        out = out + "Value: " + v_val + "\n";
+        out = out + "Secret: " + sec_str + "\n";
+        out = out + "Insecure: " + insec_str;
+        return build_tool_result(id, out);
+    }
+
+    if tool_name == "env_simulate" {
+        let ignore: Bool = json_extract_bool_field(req, "ignore_env", false);
+        let set_str: String = json_extract_str_field(req, "set");
+        let unset_str: String = json_extract_str_field(req, "unset");
+        let base: List[EnvVar] = build_posix_base_env();
+        let mut opts: EnvOpts = default_env_opts();
+        opts.ignore_env = ignore;
+        if unset_str != "" {
+            opts.unset_keys = list_push(opts.unset_keys, unset_str);
+        }
+        if set_str != "" {
+            let n: Int = chars_len(set_str);
+            let mut eq_pos: Int = -1;
+            let mut i: Int = 0;
+            while i < n {
+                if byte_at(set_str, i) == 61 { eq_pos = i; }
+                i = i + 1;
+            }
+            if eq_pos > 0 {
+                let key_part: String = str_slice(set_str, 0, eq_pos);
+                let val_part: String = str_slice(set_str, eq_pos + 1, n);
+                opts.set_vars = list_push(opts.set_vars, make_env_var(key_part, val_part, true));
+            }
+        }
+        let transformed: List[EnvVar] = apply_env_transforms(base, opts);
+        let diff: EnvDiff = compute_env_diff(base, transformed);
+        return build_tool_result(id, render_diff_report(diff));
+    }
+
+    if tool_name == "env_audit" {
+        let use_vuln: Bool = json_extract_bool_field(req, "vulnerable_profile", false);
+        let json_mode: Bool = json_extract_bool_field(req, "json_mode", false);
+        let target_env: List[EnvVar] = if use_vuln { build_vulnerable_env() } else { build_production_env() };
+        let issues: List[EnvIssue] = audit_environment(target_env);
+        let out: String = if json_mode {
+            render_json_audit_issues(issues, list_len(target_env))
+        } else {
+            render_audit_report(issues, list_len(target_env))
+        };
+        return build_tool_result(id, out);
+    }
+
+    if tool_name == "env_systemd" {
+        let unit: String = json_extract_str_field(req, "unit");
+        let base: List[EnvVar] = build_production_env();
+        return build_tool_result(id, render_systemd_dropin(base, unit));
+    }
+
+    return build_error(id, -32601, "Method or tool not found: " + tool_name);
+}
+
+pub fn handle_mcp_message(req: String) -> String {
+    let id_str: String = json_extract_str_field(req, "id");
+    let id_int: Int = json_extract_int_field(req, "id", -1);
+    let id: String = if chars_len(id_str) > 0 {
+        "\"" + id_str + "\""
+    } else if id_int >= 0 {
+        id_int.to_string()
+    } else {
+        "1"
+    };
+    let method: String = json_extract_str_field(req, "method");
+
+    if method == "initialize" {
+        return render_mcp_init(id);
+    }
+    if method == "notifications/initialized" {
+        return "";
+    }
+    if method == "tools/list" {
+        return render_mcp_tools_list(id);
+    }
+    if method == "tools/call" {
+        let tool_name: String = json_extract_str_field(req, "name");
+        return handle_mcp_call(id, tool_name, req);
+    }
+    if method == "shutdown" {
+        return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":null}\n";
+    }
+    return build_error(id, -32601, "Method not found: " + method);
+}
+
+fn find_newline_pos(s: String) -> Int {
+    let n: Int = chars_len(s);
+    let mut i: Int = 0;
+    while i < n {
+        if byte_at(s, i) == 10 {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+pub fn run_mcp_server(fr: &FsReadCap) {
+    let mut buf: String = "";
+    let mut running: Bool = true;
+    while running {
+        let r: Result[String, String] = oo_read_stdin_chunk(fr, 4096);
+        if !r.is_ok() {
+            running = false;
+        } else {
+            let chunk: String = match r { Ok(s) => s, Err(_) => "" };
+            if chars_len(chunk) == 0 {
+                running = false;
+            } else {
+                buf = buf + chunk;
+                let mut nl_pos: Int = find_newline_pos(buf);
+                while nl_pos >= 0 {
+                    let line: String = str_slice(buf, 0, nl_pos);
+                    buf = str_slice(buf, nl_pos + 1, chars_len(buf));
+                    let trimmed: String = str_trim(line);
+                    if chars_len(trimmed) > 0 {
+                        let resp: String = handle_mcp_message(trimmed);
+                        if chars_len(resp) > 0 {
+                            print(resp);
+                        }
+                    }
+                    nl_pos = find_newline_pos(buf);
+                }
+            }
+        }
+    }
+}

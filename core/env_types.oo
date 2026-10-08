@@ -1,0 +1,153 @@
+// # Environment Types & Security Classification
+//
+// Logline: Canonical data types, security descriptors, options, and sanitization primitives for environment operations.
+//
+// Setup: Pure record definitions and string classifiers with zero ambient authority.
+//
+// Beats:
+//   1. Declare EnvVar, EnvIssue, EnvDiff, and EnvOpts structures.
+//   2. Provide options constructors and string search primitives.
+//   3. Implement secret detection and credential masking heuristics.
+//   4. Identify dangerous linker overrides and dynamic injection vectors.
+
+pub type EnvVar = struct {
+    key: String,
+    val: String,
+    is_secret: Bool,
+    is_insecure: Bool,
+    is_override: Bool
+};
+
+pub type EnvIssue = struct {
+    var_name: String,
+    severity: String,
+    message: String
+};
+
+pub type EnvDiff = struct {
+    added: List[EnvVar],
+    removed: List[String],
+    modified: List[EnvVar]
+};
+
+pub type EnvOpts = struct {
+    ignore_env: Bool,
+    null_delim: Bool,
+    audit_mode: Bool,
+    sanitize_mode: Bool,
+    systemd_mode: Bool,
+    systemd_unit: String,
+    diff_mode: Bool,
+    json_mode: Bool,
+    demo_mode: Bool,
+    mcp_mode: Bool,
+    show_help: Bool,
+    show_version: Bool,
+    chdir_path: String,
+    split_string: String,
+    filter_prefix: String,
+    unset_keys: List[String],
+    set_vars: List[EnvVar],
+    command_args: List[String]
+};
+
+pub fn default_env_opts() -> EnvOpts {
+    return EnvOpts {
+        ignore_env: false,
+        null_delim: false,
+        audit_mode: false,
+        sanitize_mode: false,
+        systemd_mode: false,
+        systemd_unit: "",
+        diff_mode: false,
+        json_mode: false,
+        demo_mode: false,
+        mcp_mode: false,
+        show_help: false,
+        show_version: false,
+        chdir_path: "",
+        split_string: "",
+        filter_prefix: "",
+        unset_keys: list_new(),
+        set_vars: list_new(),
+        command_args: list_new()
+    };
+}
+
+pub fn str_starts_with(s: String, prefix: String) -> Bool {
+    let p_len: Int = chars_len(prefix);
+    let s_len: Int = chars_len(s);
+    if p_len > s_len {
+        return false;
+    }
+    return str_slice(s, 0, p_len) == prefix;
+}
+
+pub fn str_contains(s: String, needle: String) -> Bool {
+    let n_len: Int = chars_len(needle);
+    let s_len: Int = chars_len(s);
+    if n_len > s_len {
+        return false;
+    }
+    let mut i: Int = 0;
+    while i + n_len <= s_len {
+        if str_slice(s, i, i + n_len) == needle {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+pub fn is_sensitive_key(k: String) -> Bool {
+    if str_contains(k, "SECRET") || str_contains(k, "TOKEN") || str_contains(k, "PASSWORD") {
+        return true;
+    }
+    if str_contains(k, "PASSWD") || str_contains(k, "APIKEY") || str_contains(k, "API_KEY") {
+        return true;
+    }
+    if str_contains(k, "CREDENTIAL") || str_contains(k, "PRIVATE") || str_contains(k, "AUTH_") {
+        return true;
+    }
+    if str_starts_with(k, "AWS_") || str_starts_with(k, "GITHUB_") || str_starts_with(k, "GH_") {
+        return true;
+    }
+    if str_starts_with(k, "OPENAI_") || str_starts_with(k, "ANTHROPIC_") || str_starts_with(k, "SLACK_") {
+        return true;
+    }
+    return false;
+}
+
+pub fn is_insecure_key(k: String) -> Bool {
+    if k == "LD_PRELOAD" || k == "LD_LIBRARY_PATH" || k == "LD_AUDIT" {
+        return true;
+    }
+    if k == "DYLD_INSERT_LIBRARIES" || k == "DYLD_LIBRARY_PATH" || k == "IFS" {
+        return true;
+    }
+    if str_starts_with(k, "BASH_FUNC_") {
+        return true;
+    }
+    return false;
+}
+
+pub fn mask_secret(val: String) -> String {
+    let n: Int = chars_len(val);
+    if n <= 6 {
+        return "******";
+    }
+    if n <= 12 {
+        return str_slice(val, 0, 2) + "******" + str_slice(val, n - 2, n);
+    }
+    return str_slice(val, 0, 4) + "********" + str_slice(val, n - 4, n);
+}
+
+pub fn make_env_var(k: String, v: String, is_override: Bool) -> EnvVar {
+    return EnvVar {
+        key: k,
+        val: v,
+        is_secret: is_sensitive_key(k),
+        is_insecure: is_insecure_key(k),
+        is_override: is_override
+    };
+}

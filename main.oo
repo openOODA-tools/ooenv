@@ -1,32 +1,31 @@
 // # ooenv Main Entry Point
 //
-// Logline: Capability-bounded environment variable inspection, sanitization, and scoped export.
+// Logline: Sovereign POSIX environment controller, secret sanitizer, and execution simulator.
 //
-// Setup: Demands &EnvCap for environment inspection and &TermCap for output styling.
+// Setup: Demands explicit capability tokens &FsReadCap, &ProcessCap, and &EnvCap under zero ambient authority.
 //
 // Beats:
-//   1. Parse command-line options and dispatch --help, --version, or --mcp.
-//   2. Execute capability-bounded environment operations.
-//   3. Format and output structured results to standard output.
+//   1. Parse command-line options and dispatch --help, --version, --test, or --mcp.
+//   2. Route synthetic showcase requests for --demo execution.
+//   3. Dispatch security auditing, systemd unit generation, or differential inspections.
+//   4. Format and output environment variables as POSIX text, null-delimited, or structured JSON.
 
-fn render_help() -> String {
-    return "ooenv 0.1.0 (openOODA sovereign shell & terminal)\n"
-        + "usage: ooenv [options] [ARGUMENTS]...\n\n"
-        + "Capability-bounded environment variable inspection, sanitization, and scoped export.\n\n"
-        + "Options:\n"
-        + "  -h, --help           display this help and exit\n"
-        + "  -v, --version        output version information and exit\n"
-        + "      --json           output formatted as JSON Lines\n"
-        + "      --color <WHEN>   colorize output: auto, always, never [default: auto]\n"
-        + "      --theme <NAME>   override active oote palette\n"
-        + "      --mcp            run as Model Context Protocol stdio server\n";
-}
+import "core/env_types.oo";
+import "core/env_audit.oo";
+import "core/env_synthetic.oo";
+import "render/render_table.oo";
+import "render/render_json.oo";
+import "render/render_systemd.oo";
+import "ipc/cli_options.oo";
+import "ipc/mcp_server.oo";
+import "anchor.oo";
 
-fn render_version() -> String {
-    return "ooenv 0.1.0 (openOODA sovereign shell & terminal)\n";
-}
-
-fn main(args: List[String]) -> Int {
+pub fn main(
+    fr: &FsReadCap,
+    _pr: &ProcessCap,
+    _env: &EnvCap,
+    args: List[String]
+) -> Int {
     let num_args: Int = list_len(args);
     let mut i: Int = 0;
 
@@ -40,13 +39,106 @@ fn main(args: List[String]) -> Int {
             print(render_version());
             return 0;
         }
+        if arg == "--test" {
+            if run_all_tests() {
+                print("ooenv: internal anchor tests PASSED\n");
+                return 0;
+            } else {
+                print("ooenv: internal anchor tests FAILED\n");
+                return 1;
+            }
+        }
         if arg == "--mcp" {
-            print("{\"jsonrpc\":\"2.0\",\"result\":{\"status\":\"ready\",\"tool\":\"ooenv\"}}\n");
+            run_mcp_server(fr);
             return 0;
         }
         i = i + 1;
     }
 
-    print("ooenv: sovereign capability-bounded utility ready\n");
+    let opts: EnvOpts = parse_env_cli(args);
+
+    if opts.show_help {
+        print(render_help());
+        return 0;
+    }
+    if opts.show_version {
+        print(render_version());
+        return 0;
+    }
+
+    if opts.demo_mode {
+        let p_env: List[EnvVar] = build_production_env();
+        let v_env: List[EnvVar] = build_vulnerable_env();
+        let issues: List[EnvIssue] = audit_environment(v_env);
+
+        if opts.json_mode {
+            let j_out: String = "{\"production\":" + render_json_env_list(p_env, true)
+                + ",\"audit\":" + render_json_audit_issues(issues, list_len(v_env)) + "}\n";
+            print(j_out);
+        } else {
+            print("=== Sovereign Environment Showcase ===\n\n");
+            print("-- Production Environment (Sanitized) --\n");
+            let mut s_opts: EnvOpts = default_env_opts();
+            s_opts.sanitize_mode = true;
+            print(render_posix_env(p_env, s_opts));
+            print("\n-- Security Audit Findings --\n");
+            print(render_audit_report(issues, list_len(v_env)));
+            print("\n-- Systemd Unit Override Configuration --\n");
+            print(render_systemd_dropin(p_env, "ooenv-daemon"));
+        }
+        return 0;
+    }
+
+    if opts.audit_mode {
+        let audit_target: List[EnvVar] = build_production_env();
+        let issues: List[EnvIssue] = audit_environment(audit_target);
+        if opts.json_mode {
+            print(render_json_audit_issues(issues, list_len(audit_target)));
+            print("\n");
+        } else {
+            print(render_audit_report(issues, list_len(audit_target)));
+        }
+        return 0;
+    }
+
+    if opts.systemd_mode {
+        let base_env: List[EnvVar] = build_posix_base_env();
+        let transformed_env: List[EnvVar] = apply_env_transforms(base_env, opts);
+        print(render_systemd_dropin(transformed_env, opts.systemd_unit));
+        return 0;
+    }
+
+    if opts.diff_mode {
+        let base_env: List[EnvVar] = build_posix_base_env();
+        let transformed_env: List[EnvVar] = apply_env_transforms(base_env, opts);
+        let diff: EnvDiff = compute_env_diff(base_env, transformed_env);
+        if opts.json_mode {
+            print(render_json_diff_summary(diff));
+            print("\n");
+        } else {
+            print(render_diff_report(diff));
+        }
+        return 0;
+    }
+
+    // Standard POSIX inspection or execution simulation
+    let base_env: List[EnvVar] = build_posix_base_env();
+    let current_env: List[EnvVar] = apply_env_transforms(base_env, opts);
+
+    let cmd_count: Int = list_len(opts.command_args);
+    if cmd_count > 0 {
+        let cmd_name: String = list_get(opts.command_args, 0);
+        print("ooenv: simulated execution of '" + cmd_name + "' with "
+            + list_len(current_env).to_string() + " environment variables\n");
+        return 0;
+    }
+
+    if opts.json_mode {
+        print(render_json_env_list(current_env, opts.sanitize_mode));
+        print("\n");
+    } else {
+        print(render_posix_env(current_env, opts));
+    }
+
     return 0;
 }

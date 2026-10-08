@@ -1,0 +1,76 @@
+// # Core Subsystem Test Anchor
+//
+// Logline: Verification suite validating environment data types, security auditing, and transformation logic.
+//
+// Setup: Pure assertions verifying core invariants before higher-level execution.
+//
+// Beats:
+//   1. Validate secret detection heuristics and redaction masking.
+//   2. Verify security auditing on vulnerable environment models.
+//   3. Test environment transformation semantics including ignore, unset, and set.
+//   4. Confirm environment differential calculation accuracy.
+
+import "core/env_types.oo";
+import "core/env_audit.oo";
+import "core/env_synthetic.oo";
+
+pub fn run_core_tests() -> Bool {
+    // Test 1: Secret detection & masking
+    let key_sec: String = "AWS_SECRET_ACCESS_KEY";
+    if !is_sensitive_key(key_sec) {
+        print("FAIL: core is_sensitive_key failed for AWS_SECRET_ACCESS_KEY\n");
+        return false;
+    }
+    let masked: String = mask_secret("supersecretvalue12345");
+    if !str_contains(masked, "********") {
+        print("FAIL: core mask_secret did not contain asterisks\n");
+        return false;
+    }
+
+    // Test 2: Insecure key detection
+    if !is_insecure_key("LD_PRELOAD") {
+        print("FAIL: core is_insecure_key failed for LD_PRELOAD\n");
+        return false;
+    }
+
+    // Test 3: PATH security auditing
+    let path_issues: List[EnvIssue] = audit_path_security(".:/usr/bin");
+    if list_len(path_issues) == 0 {
+        print("FAIL: core audit_path_security failed to detect relative dot entry\n");
+        return false;
+    }
+
+    // Test 4: Vulnerable environment audit
+    let vuln_env: List[EnvVar] = build_vulnerable_env();
+    let issues: List[EnvIssue] = audit_environment(vuln_env);
+    if list_len(issues) < 3 {
+        print("FAIL: core audit_environment detected fewer issues than expected\n");
+        return false;
+    }
+
+    // Test 5: Environment transformations
+    let base: List[EnvVar] = build_posix_base_env();
+    let mut opts: EnvOpts = default_env_opts();
+    opts.set_vars = list_push(opts.set_vars, make_env_var("TEST_VAR", "hello", true));
+    opts.unset_keys = list_push(opts.unset_keys, "LOGNAME");
+    let transformed: List[EnvVar] = apply_env_transforms(base, opts);
+
+    if find_var_by_key(transformed, "LOGNAME") >= 0 {
+        print("FAIL: core apply_env_transforms failed to unset LOGNAME\n");
+        return false;
+    }
+    if find_var_by_key(transformed, "TEST_VAR") < 0 {
+        print("FAIL: core apply_env_transforms failed to set TEST_VAR\n");
+        return false;
+    }
+
+    // Test 6: Environment diff calculation
+    let diff: EnvDiff = compute_env_diff(base, transformed);
+    if list_len(diff.added) != 1 || list_len(diff.removed) != 1 {
+        print("FAIL: core compute_env_diff did not report 1 added and 1 removed\n");
+        return false;
+    }
+
+    print("PASS: core subsystem tests passed\n");
+    return true;
+}

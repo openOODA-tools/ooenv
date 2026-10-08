@@ -1,0 +1,112 @@
+// # Environment Text & Table Renderer
+//
+// Logline: Formats environment records, audit findings, and differentials into terminal-ready text displays.
+//
+// Setup: Pure string formatting pipelines supporting POSIX null-delimiters and credential masking.
+//
+// Beats:
+//   1. Render POSIX KEY=VALUE environment listings with optional null delimiters.
+//   2. Apply credential masking for sanitized terminal inspection.
+//   3. Render structured security audit reports with severity classification.
+//   4. Format environment differential logs highlighting additions, modifications, and removals.
+
+import "core/env_types.oo";
+
+pub fn render_posix_env(vars: List[EnvVar], opts: EnvOpts) -> String {
+    let mut out: String = "";
+    let n: Int = list_len(vars);
+    let mut i: Int = 0;
+    let delim: String = if opts.null_delim { "\0" } else { "\n" };
+
+    while i < n {
+        let v: EnvVar = list_get(vars, i);
+        let val_display: String = if opts.sanitize_mode && v.is_secret {
+            mask_secret(v.val)
+        } else {
+            v.val
+        };
+        out = out + v.key + "=" + val_display + delim;
+        i = i + 1;
+    }
+    return out;
+}
+
+pub fn render_audit_report(issues: List[EnvIssue], var_count: Int) -> String {
+    let mut out: String = "";
+    out = out + "================================================================================\n";
+    out = out + "                   OOENV SOVEREIGN SECURITY AUDIT REPORT                        \n";
+    out = out + "================================================================================\n";
+    out = out + "Inspected " + var_count.to_string() + " environment variables.\n\n";
+
+    let n: Int = list_len(issues);
+    if n == 0 {
+        out = out + "[OK] Zero security vulnerabilities or credential leaks detected.\n";
+        out = out + "     Environment is clean, well-formed, and strictly bounded.\n";
+        return out;
+    }
+
+    out = out + "FOUND " + n.to_string() + " SECURITY FINDINGS:\n";
+    out = out + "--------------------------------------------------------------------------------\n";
+    let mut i: Int = 0;
+    let mut crit_count: Int = 0;
+    let mut high_count: Int = 0;
+    let mut warn_count: Int = 0;
+
+    while i < n {
+        let issue: EnvIssue = list_get(issues, i);
+        let tag: String = if issue.severity == "CRITICAL" {
+            crit_count = crit_count + 1;
+            "[CRITICAL]"
+        } else if issue.severity == "HIGH" {
+            high_count = high_count + 1;
+            "[HIGH]    "
+        } else {
+            warn_count = warn_count + 1;
+            "[WARN]    "
+        };
+        out = out + tag + " " + issue.var_name + "\n";
+        out = out + "          " + issue.message + "\n";
+        i = i + 1;
+    }
+
+    out = out + "--------------------------------------------------------------------------------\n";
+    out = out + "Summary: " + crit_count.to_string() + " Critical, "
+        + high_count.to_string() + " High, "
+        + warn_count.to_string() + " Warnings.\n";
+    return out;
+}
+
+pub fn render_diff_report(diff: EnvDiff) -> String {
+    let mut out: String = "";
+    out = out + "--- BASE ENVIRONMENT\n";
+    out = out + "+++ SIMULATED TARGET ENVIRONMENT\n";
+
+    let rem_len: Int = list_len(diff.removed);
+    let mut r_idx: Int = 0;
+    while r_idx < rem_len {
+        let key: String = list_get(diff.removed, r_idx);
+        out = out + "- " + key + "\n";
+        r_idx = r_idx + 1;
+    }
+
+    let mod_len: Int = list_len(diff.modified);
+    let mut m_idx: Int = 0;
+    while m_idx < mod_len {
+        let m_var: EnvVar = list_get(diff.modified, m_idx);
+        out = out + "~ " + m_var.key + "=" + m_var.val + " (MODIFIED)\n";
+        m_idx = m_idx + 1;
+    }
+
+    let add_len: Int = list_len(diff.added);
+    let mut a_idx: Int = 0;
+    while a_idx < add_len {
+        let a_var: EnvVar = list_get(diff.added, a_idx);
+        out = out + "+ " + a_var.key + "=" + a_var.val + "\n";
+        a_idx = a_idx + 1;
+    }
+
+    if rem_len == 0 && mod_len == 0 && add_len == 0 {
+        out = out + "  (No environment modifications)\n";
+    }
+    return out;
+}

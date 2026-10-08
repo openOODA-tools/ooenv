@@ -1,0 +1,108 @@
+// # Environment JSON Serializer
+//
+// Logline: Converts environment variables, security audits, and diff models into RFC 8259 compliant JSON strings.
+//
+// Setup: Pure string synthesis routines producing clean machine-readable structures.
+//
+// Beats:
+//   1. Serialize environment variable arrays with security classifications.
+//   2. Output structured JSON security audit metrics and finding objects.
+//   3. Format environment differentials into structured added, removed, and modified collections.
+//   4. Deliver sanitized payloads compatible with CLI automation and MCP clients.
+
+import "core/env_types.oo";
+
+fn bool_to_str(b: Bool) -> String {
+    if b {
+        return "true";
+    }
+    return "false";
+}
+
+pub fn render_json_env_list(vars: List[EnvVar], sanitize: Bool) -> String {
+    let mut out: String = "[\n";
+    let n: Int = list_len(vars);
+    let mut i: Int = 0;
+    while i < n {
+        let v: EnvVar = list_get(vars, i);
+        let val_str: String = if sanitize && v.is_secret {
+            mask_secret(v.val)
+        } else {
+            v.val
+        };
+        out = out + "  {\"key\":\"" + v.key + "\",\"value\":\"" + val_str + "\","
+            + "\"is_secret\":" + bool_to_str(v.is_secret) + ","
+            + "\"is_insecure\":" + bool_to_str(v.is_insecure) + "}";
+        if i + 1 < n {
+            out = out + ",";
+        }
+        out = out + "\n";
+        i = i + 1;
+    }
+    out = out + "]";
+    return out;
+}
+
+pub fn render_json_audit_issues(issues: List[EnvIssue], total_vars: Int) -> String {
+    let mut out: String = "{\n";
+    out = out + "  \"inspected_variables\":" + total_vars.to_string() + ",\n";
+    let n: Int = list_len(issues);
+    out = out + "  \"issue_count\":" + n.to_string() + ",\n";
+    out = out + "  \"issues\":[\n";
+
+    let mut i: Int = 0;
+    while i < n {
+        let issue: EnvIssue = list_get(issues, i);
+        out = out + "    {\"variable\":\"" + issue.var_name + "\","
+            + "\"severity\":\"" + issue.severity + "\","
+            + "\"message\":\"" + issue.message + "\"}";
+        if i + 1 < n {
+            out = out + ",";
+        }
+        out = out + "\n";
+        i = i + 1;
+    }
+    out = out + "  ]\n}";
+    return out;
+}
+
+pub fn render_json_diff_summary(diff: EnvDiff) -> String {
+    let mut out: String = "{\n  \"removed\":[";
+    let rem_len: Int = list_len(diff.removed);
+    let mut r_idx: Int = 0;
+    while r_idx < rem_len {
+        out = out + "\"" + list_get(diff.removed, r_idx) + "\"";
+        if r_idx + 1 < rem_len {
+            out = out + ",";
+        }
+        r_idx = r_idx + 1;
+    }
+    out = out + "],\n  \"added\":[\n";
+
+    let add_len: Int = list_len(diff.added);
+    let mut a_idx: Int = 0;
+    while a_idx < add_len {
+        let a_var: EnvVar = list_get(diff.added, a_idx);
+        out = out + "    {\"key\":\"" + a_var.key + "\",\"value\":\"" + a_var.val + "\"}";
+        if a_idx + 1 < add_len {
+            out = out + ",";
+        }
+        out = out + "\n";
+        a_idx = a_idx + 1;
+    }
+    out = out + "  ],\n  \"modified\":[\n";
+
+    let mod_len: Int = list_len(diff.modified);
+    let mut m_idx: Int = 0;
+    while m_idx < mod_len {
+        let m_var: EnvVar = list_get(diff.modified, m_idx);
+        out = out + "    {\"key\":\"" + m_var.key + "\",\"value\":\"" + m_var.val + "\"}";
+        if m_idx + 1 < mod_len {
+            out = out + ",";
+        }
+        out = out + "\n";
+        m_idx = m_idx + 1;
+    }
+    out = out + "  ]\n}";
+    return out;
+}

@@ -1,0 +1,165 @@
+// # Synthetic Environment Generation & Transformation
+//
+// Logline: Deterministic test fixtures, transformation pipelines, and environment differential calculations.
+//
+// Setup: Pure state transformers executing capability-bounded environment modifications.
+//
+// Beats:
+//   1. Generate baseline POSIX, production service, and security-stressed environments.
+//   2. Apply unsetting, ignoring, and overriding transformations.
+//   3. Filter environment variables by key prefix.
+//   4. Calculate precise structural diffs between baseline and modified states.
+
+import "core/env_types.oo";
+
+pub fn build_posix_base_env() -> List[EnvVar] {
+    let mut vars: List[EnvVar] = list_new();
+    vars = list_push(vars, make_env_var("HOME", "/home/sovereign", false));
+    vars = list_push(vars, make_env_var("LANG", "en_US.UTF-8", false));
+    vars = list_push(vars, make_env_var("LOGNAME", "sovereign", false));
+    vars = list_push(vars, make_env_var("PATH", "/usr/local/bin:/usr/bin:/bin", false));
+    vars = list_push(vars, make_env_var("SHELL", "/bin/oosh", false));
+    vars = list_push(vars, make_env_var("TERM", "xterm-256color", false));
+    vars = list_push(vars, make_env_var("USER", "sovereign", false));
+    return vars;
+}
+
+pub fn build_production_env() -> List[EnvVar] {
+    let mut vars: List[EnvVar] = build_posix_base_env();
+    vars = list_push(vars, make_env_var("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE", false));
+    vars = list_push(vars, make_env_var("AWS_REGION", "us-west-2", false));
+    vars = list_push(vars, make_env_var("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", false));
+    vars = list_push(vars, make_env_var("DATABASE_URL", "postgres://app:SecretPass123@db.internal:5432/prod", false));
+    vars = list_push(vars, make_env_var("LOG_LEVEL", "info", false));
+    vars = list_push(vars, make_env_var("NODE_ENV", "production", false));
+    vars = list_push(vars, make_env_var("OPENAI_API_KEY", "sk-proj-99887766554433221100aabbccddeeff", false));
+    vars = list_push(vars, make_env_var("PORT", "8080", false));
+    return vars;
+}
+
+pub fn build_vulnerable_env() -> List[EnvVar] {
+    let mut vars: List[EnvVar] = list_new();
+    vars = list_push(vars, make_env_var("PATH", ".:/usr/local/bin:/usr/bin:/tmp", false));
+    vars = list_push(vars, make_env_var("LD_PRELOAD", "/tmp/libmalicious.so", false));
+    vars = list_push(vars, make_env_var("BASH_FUNC_run()", "() { :;}; echo pwned", false));
+    vars = list_push(vars, make_env_var("DB_PASSWORD", "SuperSecretPass!", false));
+    return vars;
+}
+
+pub fn find_var_by_key(vars: List[EnvVar], key: String) -> Int {
+    let n: Int = list_len(vars);
+    let mut i: Int = 0;
+    while i < n {
+        let v: EnvVar = list_get(vars, i);
+        if v.key == key {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+pub fn is_in_string_list(list: List[String], val: String) -> Bool {
+    let n: Int = list_len(list);
+    let mut i: Int = 0;
+    while i < n {
+        if list_get(list, i) == val {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+pub fn apply_env_transforms(base: List[EnvVar], opts: EnvOpts) -> List[EnvVar] {
+    let mut current: List[EnvVar] = list_new();
+    if !opts.ignore_env {
+        let base_len: Int = list_len(base);
+        let mut b_idx: Int = 0;
+        while b_idx < base_len {
+            let v: EnvVar = list_get(base, b_idx);
+            if !is_in_string_list(opts.unset_keys, v.key) {
+                current = list_push(current, v);
+            }
+            b_idx = b_idx + 1;
+        }
+    }
+
+    let set_len: Int = list_len(opts.set_vars);
+    let mut s_idx: Int = 0;
+    while s_idx < set_len {
+        let new_v: EnvVar = list_get(opts.set_vars, s_idx);
+        let existing_idx: Int = find_var_by_key(current, new_v.key);
+        if existing_idx >= 0 {
+            let mut updated: List[EnvVar] = list_new();
+            let c_len: Int = list_len(current);
+            let mut u_idx: Int = 0;
+            while u_idx < c_len {
+                if u_idx == existing_idx {
+                    updated = list_push(updated, make_env_var(new_v.key, new_v.val, true));
+                } else {
+                    updated = list_push(updated, list_get(current, u_idx));
+                }
+                u_idx = u_idx + 1;
+            }
+            current = updated;
+        } else {
+            current = list_push(current, make_env_var(new_v.key, new_v.val, true));
+        }
+        s_idx = s_idx + 1;
+    }
+
+    if opts.filter_prefix != "" {
+        let mut filtered: List[EnvVar] = list_new();
+        let cur_len: Int = list_len(current);
+        let mut f_idx: Int = 0;
+        while f_idx < cur_len {
+            let item: EnvVar = list_get(current, f_idx);
+            if str_starts_with(item.key, opts.filter_prefix) {
+                filtered = list_push(filtered, item);
+            }
+            f_idx = f_idx + 1;
+        }
+        current = filtered;
+    }
+
+    return current;
+}
+
+pub fn compute_env_diff(base: List[EnvVar], result: List[EnvVar]) -> EnvDiff {
+    let mut added: List[EnvVar] = list_new();
+    let mut removed: List[String] = list_new();
+    let mut modified: List[EnvVar] = list_new();
+
+    let res_len: Int = list_len(result);
+    let mut r_idx: Int = 0;
+    while r_idx < res_len {
+        let r_var: EnvVar = list_get(result, r_idx);
+        let b_idx: Int = find_var_by_key(base, r_var.key);
+        if b_idx < 0 {
+            added = list_push(added, r_var);
+        } else {
+            let b_var: EnvVar = list_get(base, b_idx);
+            if b_var.val != r_var.val {
+                modified = list_push(modified, r_var);
+            }
+        }
+        r_idx = r_idx + 1;
+    }
+
+    let b_len: Int = list_len(base);
+    let mut b_scan: Int = 0;
+    while b_scan < b_len {
+        let b_var: EnvVar = list_get(base, b_scan);
+        if find_var_by_key(result, b_var.key) < 0 {
+            removed = list_push(removed, b_var.key);
+        }
+        b_scan = b_scan + 1;
+    }
+
+    return EnvDiff {
+        added: added,
+        removed: removed,
+        modified: modified
+    };
+}

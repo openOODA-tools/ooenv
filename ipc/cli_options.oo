@@ -1,0 +1,122 @@
+// # POSIX CLI Option Parser & Dispatcher
+//
+// Logline: Robust argument parser mapping POSIX flags, security audit switches, and systemd overrides.
+//
+// Setup: Pure argument scanning and option structure assembly with zero ambient authority.
+//
+// Beats:
+//   1. Parse POSIX standard options including -i, -0, -u, -C, and -S.
+//   2. Parse security extension switches including --audit, --sanitize, and --diff.
+//   3. Handle systemd unit override switches and target selectors.
+//   4. Deliver populated EnvOpts structure for pipeline dispatch.
+
+import "core/env_types.oo";
+
+pub fn render_help() -> String {
+    return "ooenv 0.2.0 (openOODA sovereign environment controller)\n"
+        + "usage: ooenv [options] [NAME=VALUE...] [COMMAND [ARG...]]\n\n"
+        + "Capability-bounded environment inspection, secret sanitization, and execution simulation.\n\n"
+        + "POSIX Options:\n"
+        + "  -i, --ignore-environment   start with an empty environment\n"
+        + "  -0, --null                 end each output line with NUL, not newline\n"
+        + "  -u, --unset=NAME           remove variable from environment\n"
+        + "  -C, --chdir=DIR            change working directory\n"
+        + "  -S, --split-string=S       process and split S into separate arguments\n\n"
+        + "Sovereign Security & Systemd Extensions:\n"
+        + "      --audit                perform security audit for leaked credentials and unsafe PATH\n"
+        + "      --sanitize             mask sensitive tokens and passwords in output\n"
+        + "      --diff                 show differential between base and modified environments\n"
+        + "      --filter <PREFIX>      display only variables beginning with PREFIX\n"
+        + "      --systemd              generate systemd unit drop-in override configuration\n"
+        + "      --unit <NAME>          specify systemd unit service name [default: service]\n"
+        + "  -j, --json                 output formatted as JSON structure\n"
+        + "  -D, --demo                 run multi-scenario sovereign environment showcase\n"
+        + "      --mcp                  run as Model Context Protocol (MCP) stdio server\n"
+        + "      --test                 run internal substrate anchor verification tests\n"
+        + "  -h, --help                 display this help and exit\n"
+        + "  -v, --version              output version information and exit\n";
+}
+
+pub fn render_version() -> String {
+    return "ooenv 0.2.0 (openOODA sovereign environment controller)\n";
+}
+
+fn split_key_val(s: String) -> EnvVar {
+    let n: Int = chars_len(s);
+    let mut i: Int = 0;
+    while i < n {
+        if byte_at(s, i) == 61 {
+            let k: String = str_slice(s, 0, i);
+            let v: String = str_slice(s, i + 1, n);
+            return make_env_var(k, v, true);
+        }
+        i = i + 1;
+    }
+    return make_env_var(s, "", true);
+}
+
+pub fn parse_env_cli(args: List[String]) -> EnvOpts {
+    let mut opts: EnvOpts = default_env_opts();
+    let num_args: Int = list_len(args);
+    let mut i: Int = 0;
+    let mut parsing_flags: Bool = true;
+
+    while i < num_args {
+        let arg: String = list_get(args, i);
+
+        if parsing_flags && (arg == "-h" || arg == "--help") {
+            opts.show_help = true;
+            return opts;
+        } else if parsing_flags && (arg == "-v" || arg == "--version") {
+            opts.show_version = true;
+            return opts;
+        } else if parsing_flags && (arg == "-i" || arg == "--ignore-environment") {
+            opts.ignore_env = true;
+        } else if parsing_flags && (arg == "-0" || arg == "--null") {
+            opts.null_delim = true;
+        } else if parsing_flags && (arg == "-j" || arg == "--json") {
+            opts.json_mode = true;
+        } else if parsing_flags && (arg == "-D" || arg == "--demo") {
+            opts.demo_mode = true;
+        } else if parsing_flags && arg == "--mcp" {
+            opts.mcp_mode = true;
+        } else if parsing_flags && arg == "--audit" {
+            opts.audit_mode = true;
+        } else if parsing_flags && arg == "--sanitize" {
+            opts.sanitize_mode = true;
+        } else if parsing_flags && arg == "--diff" {
+            opts.diff_mode = true;
+        } else if parsing_flags && arg == "--systemd" {
+            opts.systemd_mode = true;
+        } else if parsing_flags && arg == "--unit" && i + 1 < num_args {
+            i = i + 1;
+            opts.systemd_unit = list_get(args, i);
+        } else if parsing_flags && (arg == "-u" || arg == "--unset") && i + 1 < num_args {
+            i = i + 1;
+            opts.unset_keys = list_push(opts.unset_keys, list_get(args, i));
+        } else if parsing_flags && str_starts_with(arg, "--unset=") {
+            let u_key: String = str_slice(arg, 8, chars_len(arg));
+            opts.unset_keys = list_push(opts.unset_keys, u_key);
+        } else if parsing_flags && (arg == "-C" || arg == "--chdir") && i + 1 < num_args {
+            i = i + 1;
+            opts.chdir_path = list_get(args, i);
+        } else if parsing_flags && (arg == "-S" || arg == "--split-string") && i + 1 < num_args {
+            i = i + 1;
+            opts.split_string = list_get(args, i);
+        } else if parsing_flags && arg == "--filter" && i + 1 < num_args {
+            i = i + 1;
+            opts.filter_prefix = list_get(args, i);
+        } else if parsing_flags && arg == "--test" {
+            // Internal anchor trigger
+            opts.command_args = list_push(opts.command_args, "--test");
+        } else if str_contains(arg, "=") {
+            let ev: EnvVar = split_key_val(arg);
+            opts.set_vars = list_push(opts.set_vars, ev);
+        } else {
+            parsing_flags = false;
+            opts.command_args = list_push(opts.command_args, arg);
+        }
+        i = i + 1;
+    }
+    return opts;
+}

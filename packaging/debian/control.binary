@@ -1,0 +1,10 @@
+Package: ooenv
+Version: 0.2.0-1
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: openOODA-tools <ops@openooda.org>
+Description: Sovereign POSIX environment controller, secret sanitizer, and execution simulator in pure openOODA.
+ Capability-bounded openOODA utility with zero ambient authority,
+ secret token redaction, dangerous variable auditing, systemd unit override
+ generation, and streaming Model Context Protocol (MCP) surface.

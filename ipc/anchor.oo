@@ -1,0 +1,81 @@
+// # IPC Subsystem Test Anchor
+//
+// Logline: Verification suite validating JSON parsing, CLI option decoding, and MCP server dispatch.
+//
+// Setup: Pure assertions verifying command line options and protocol message handling.
+//
+// Beats:
+//   1. Validate JSON field extraction primitives for strings, booleans, and numbers.
+//   2. Verify CLI argument parsing for POSIX and security extension switches.
+//   3. Test MCP initialize, tools/list, and tool call responses.
+//   4. Confirm correct JSON-RPC error generation on invalid inputs.
+
+import "core/env_types.oo";
+import "ipc/json_field.oo";
+import "ipc/cli_options.oo";
+import "ipc/mcp_server.oo";
+
+pub fn run_ipc_tests() -> Bool {
+    // Test 1: JSON field extraction
+    let test_json: String = "{\"method\":\"tools/call\",\"id\":42,\"name\":\"env_get\",\"debug\":true}";
+    if json_extract_str_field(test_json, "method") != "tools/call" {
+        print("FAIL: ipc json_extract_str_field failed\n");
+        return false;
+    }
+    if json_extract_int_field(test_json, "id", 0) != 42 {
+        print("FAIL: ipc json_extract_int_field failed\n");
+        return false;
+    }
+    if !json_extract_bool_field(test_json, "debug", false) {
+        print("FAIL: ipc json_extract_bool_field failed\n");
+        return false;
+    }
+
+    // Test 2: CLI option parsing
+    let mut args: List[String] = list_new();
+    args = list_push(args, "-i");
+    args = list_push(args, "-u");
+    args = list_push(args, "OLD_VAR");
+    args = list_push(args, "NEW_VAR=secret123");
+    args = list_push(args, "--audit");
+    let opts: EnvOpts = parse_env_cli(args);
+
+    if !opts.ignore_env {
+        print("FAIL: ipc parse_env_cli failed on -i\n");
+        return false;
+    }
+    if !opts.audit_mode {
+        print("FAIL: ipc parse_env_cli failed on --audit\n");
+        return false;
+    }
+    if list_len(opts.unset_keys) != 1 || list_get(opts.unset_keys, 0) != "OLD_VAR" {
+        print("FAIL: ipc parse_env_cli failed on unset\n");
+        return false;
+    }
+    if list_len(opts.set_vars) != 1 {
+        print("FAIL: ipc parse_env_cli failed on set_vars\n");
+        return false;
+    }
+
+    // Test 3: MCP protocol handling
+    let init_resp: String = render_mcp_init("1");
+    if !str_contains(init_resp, "ooenv") || !str_contains(init_resp, "0.2.0") {
+        print("FAIL: ipc render_mcp_init missing metadata\n");
+        return false;
+    }
+
+    let list_resp: String = render_mcp_tools_list("2");
+    if !str_contains(list_resp, "env_list") || !str_contains(list_resp, "env_audit") {
+        print("FAIL: ipc render_mcp_tools_list missing tools\n");
+        return false;
+    }
+
+    let call_resp: String = handle_mcp_call("3", "env_get", "{\"variable\":\"PORT\"}");
+    if !str_contains(call_resp, "PORT") {
+        print("FAIL: ipc handle_mcp_call env_get failed\n");
+        return false;
+    }
+
+    print("PASS: ipc subsystem tests passed\n");
+    return true;
+}

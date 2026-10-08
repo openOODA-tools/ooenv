@@ -1,13 +1,38 @@
-// # ooenv Root Anchor
+// # ooenv Root Subsystem Verification Anchor
 //
-// Logline: Top-level anchor re-exporting options, core logic, render, and ipc subsystems.
+// Logline: Comprehensive test coordinator executing core, render, and ipc test suites.
 //
-// Setup: Pure shim re-exporting all ooenv subsystem anchors.
+// Setup: Root orchestrator validating environment capabilities and invariant enforcement.
 //
 // Beats:
-//   1. Re-export options parsing subsystem.
-//   2. Re-export core ooenv execution engine.
-//   3. Re-export render formatting subsystem.
-//   4. Re-export Model Context Protocol (MCP) IPC subsystem.
+//   1. Execute core subsystem assertions (secret masking, auditing, transformations).
+//   2. Execute render subsystem assertions (POSIX, JSON, and systemd outputs).
+//   3. Execute ipc subsystem assertions (JSON parsing, CLI parsing, MCP protocol).
+//   4. Report overall verification status.
 
-import "main.oo";
+import "core/anchor.oo";
+import "render/anchor.oo";
+import "ipc/anchor.oo";
+
+pub fn run_all_tests() -> Bool {
+    print("--- Running ooenv Core Tests ---\n");
+    if !run_core_tests() {
+        print("FAIL: core subsystem tests failed\n");
+        return false;
+    }
+
+    print("--- Running ooenv Render Tests ---\n");
+    if !run_render_tests() {
+        print("FAIL: render subsystem tests failed\n");
+        return false;
+    }
+
+    print("--- Running ooenv IPC Tests ---\n");
+    if !run_ipc_tests() {
+        print("FAIL: ipc subsystem tests failed\n");
+        return false;
+    }
+
+    print("ALL OOENV SUBSYSTEM TESTS PASSED\n");
+    return true;
+}

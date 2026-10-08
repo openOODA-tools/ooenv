@@ -1,0 +1,136 @@
+// # Environment Security Auditor
+//
+// Logline: Comprehensive vulnerability detection and credential exposure analysis for process environments.
+//
+// Setup: Pure static security inspection heuristics against environment variables and PATH configurations.
+//
+// Beats:
+//   1. Inspect PATH entries for insecure relative paths and world-writable directories.
+//   2. Detect dangerous dynamic linker overrides and code injection vectors.
+//   3. Identify exposed API credentials, private tokens, and secret keys.
+//   4. Collate security audit findings ranked by severity level.
+
+import "core/env_types.oo";
+
+pub fn audit_path_security(path_val: String) -> List[EnvIssue] {
+    let mut issues: List[EnvIssue] = list_new();
+    let n: Int = chars_len(path_val);
+    if n == 0 {
+        issues = list_push(issues, EnvIssue {
+            var_name: "PATH",
+            severity: "HIGH",
+            message: "PATH environment variable is empty, defaulting to current working directory lookup."
+        });
+        return issues;
+    }
+    if str_starts_with(path_val, ":") || str_slice(path_val, n - 1, n) == ":" {
+        issues = list_push(issues, EnvIssue {
+            var_name: "PATH",
+            severity: "HIGH",
+            message: "PATH contains leading or trailing colon, treating current directory as executable lookup path."
+        });
+    }
+    if str_contains(path_val, "::") {
+        issues = list_push(issues, EnvIssue {
+            var_name: "PATH",
+            severity: "HIGH",
+            message: "PATH contains empty element (::), resolving current working directory implicitly."
+        });
+    }
+    if str_contains(path_val, ":.:") || str_starts_with(path_val, ".:") || path_val == "." {
+        issues = list_push(issues, EnvIssue {
+            var_name: "PATH",
+            severity: "CRITICAL",
+            message: "PATH explicitly includes current working directory (.), vulnerable to Trojan binaries."
+        });
+    }
+    if str_contains(path_val, "/tmp") || str_contains(path_val, "/var/tmp") {
+        issues = list_push(issues, EnvIssue {
+            var_name: "PATH",
+            severity: "CRITICAL",
+            message: "PATH contains world-writable directory (/tmp or /var/tmp), permitting privilege escalation."
+        });
+    }
+    return issues;
+}
+
+pub fn audit_variable(v: EnvVar) -> List[EnvIssue] {
+    let mut issues: List[EnvIssue] = list_new();
+    if v.key == "LD_PRELOAD" {
+        issues = list_push(issues, EnvIssue {
+            var_name: v.key,
+            severity: "CRITICAL",
+            message: "Dynamic library preloading variable set; overrides symbol resolution and facilitates rootkits."
+        });
+    } else if v.key == "LD_LIBRARY_PATH" || v.key == "DYLD_LIBRARY_PATH" {
+        issues = list_push(issues, EnvIssue {
+            var_name: v.key,
+            severity: "HIGH",
+            message: "Custom library search path; risks arbitrary code execution if pointing to untrusted directories."
+        });
+    } else if str_starts_with(v.key, "BASH_FUNC_") {
+        issues = list_push(issues, EnvIssue {
+            var_name: v.key,
+            severity: "HIGH",
+            message: "Exported shell function detected; potential command injection and Shellshock-class vector."
+        });
+    } else if v.key == "IFS" {
+        issues = list_push(issues, EnvIssue {
+            var_name: v.key,
+            severity: "HIGH",
+            message: "Custom internal field separator defined; alters argument word splitting in subshells."
+        });
+    }
+
+    if v.key == "PATH" {
+        let path_issues: List[EnvIssue] = audit_path_security(v.val);
+        let mut p_idx: Int = 0;
+        let p_count: Int = list_len(path_issues);
+        while p_idx < p_count {
+            issues = list_push(issues, list_get(path_issues, p_idx));
+            p_idx = p_idx + 1;
+        }
+    }
+
+    if v.is_secret {
+        let mut sev: String = "WARN";
+        let mut msg: String = "Potential sensitive credential or secret token exposed in process environment.";
+        if str_starts_with(v.key, "AWS_") {
+            sev = "HIGH";
+            msg = "Amazon Web Services access credential exposed in plaintext.";
+        } else if str_starts_with(v.key, "GITHUB_") || str_starts_with(v.key, "GH_") {
+            sev = "HIGH";
+            msg = "GitHub personal access token or OAuth credential exposed in plaintext.";
+        } else if str_starts_with(v.key, "OPENAI_") || str_starts_with(v.key, "ANTHROPIC_") {
+            sev = "HIGH";
+            msg = "AI model provider API key exposed in environment.";
+        } else if str_contains(v.key, "PASSWORD") || str_contains(v.key, "PASSWD") {
+            sev = "CRITICAL";
+            msg = "Plaintext password detected in environment variable.";
+        }
+        issues = list_push(issues, EnvIssue {
+            var_name: v.key,
+            severity: sev,
+            message: msg
+        });
+    }
+    return issues;
+}
+
+pub fn audit_environment(vars: List[EnvVar]) -> List[EnvIssue] {
+    let mut all_issues: List[EnvIssue] = list_new();
+    let n: Int = list_len(vars);
+    let mut i: Int = 0;
+    while i < n {
+        let v: EnvVar = list_get(vars, i);
+        let issues: List[EnvIssue] = audit_variable(v);
+        let m: Int = list_len(issues);
+        let mut j: Int = 0;
+        while j < m {
+            all_issues = list_push(all_issues, list_get(issues, j));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return all_issues;
+}
